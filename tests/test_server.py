@@ -1,5 +1,6 @@
 """End-to-end server tests."""
 
+import inspect
 import json
 import threading
 from unittest.mock import AsyncMock, patch
@@ -10,6 +11,9 @@ from jcodemunch_mcp.server import (
     _coerce_arguments,
     call_tool,
     list_tools,
+    run_sse_server,
+    run_stdio_server,
+    run_streamable_http_server,
 )
 
 
@@ -76,6 +80,17 @@ async def test_server_lists_all_tools():
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+@pytest.mark.parametrize(
+    "startup_func",
+    [run_stdio_server, run_sse_server, run_streamable_http_server],
+)
+def test_server_startup_transports_initialize_error_tracking(startup_func):
+    """Every transport startup path must activate configured error tracking."""
+    source = inspect.getsource(startup_func)
+
+    assert "_init_error_tracking_for_startup()" in source
 
 
 @pytest.mark.asyncio
@@ -1232,6 +1247,56 @@ async def test_project_tool_disabled_rejected_in_call_tool():
         config_module._GLOBAL_CONFIG.update(orig_global)
         config_module._PROJECT_CONFIGS.clear()
         config_module._PROJECT_CONFIGS.update(orig_project)
+
+
+@pytest.mark.asyncio
+async def test_disabled_tools_apply_to_legacy_reading_aliases():
+    """Disabling a unified reading tool must also block its hidden old name."""
+    from mcp.types import CallToolResult
+
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        config_module._GLOBAL_CONFIG["disabled_tools"] = ["search_units"]
+        config_module._GLOBAL_CONFIG["meta_fields"] = None
+
+        result = await call_tool(
+            "search_symbols",
+            {"repo": "owner/repo", "query": "hello"},
+        )
+
+        assert isinstance(result, CallToolResult)
+        assert result.isError is True
+        payload = json.loads(result.content[0].text)
+        assert "search_symbols" in payload["error"]
+        assert "search_units" in payload["error"]
+        assert "disabled" in payload["error"].lower()
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
+
+
+@pytest.mark.asyncio
+async def test_disabled_tools_legacy_names_filter_canonical_schema():
+    """Old disabled_tools configs should still remove the replacement tool."""
+    from jcodemunch_mcp import config as config_module
+
+    orig_config = config_module._GLOBAL_CONFIG.copy()
+    config_module._GLOBAL_CONFIG.clear()
+
+    try:
+        config_module._GLOBAL_CONFIG["disabled_tools"] = ["search_symbols"]
+
+        tools = await list_tools()
+        names = {t.name for t in tools}
+
+        assert "search_units" not in names
+    finally:
+        config_module._GLOBAL_CONFIG.clear()
+        config_module._GLOBAL_CONFIG.update(orig_config)
 
 
 @pytest.mark.asyncio

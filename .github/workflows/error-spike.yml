@@ -1,0 +1,50 @@
+name: 'Error Spike → GitHub Issue'
+
+# Scheduled probe: every 30 minutes, plus manual runs via workflow_dispatch.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      window-minutes:
+        description: 'Look-back window in minutes'
+        required: false
+        default: '60'
+      threshold:
+        description: 'Minimum ERROR count to trigger issue creation'
+        required: false
+        default: '50'
+
+permissions:
+  contents: read
+  issues: write
+
+# Concurrency: a single in-flight spike probe per repo; a new push cancels the
+# old one if both would race. No cross-contamination of the threshold state.
+concurrency:
+  group: error-spike-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: 'Probe error rate, create issue if threshold breached'
+    runs-on: ubuntu-latest
+    # SENTRY_DSN read via env; no required value. Pipeline degrades gracefully
+    # when SaaS SDKs are unconfigured — GitHub-native path is the deliverable.
+    env:
+      SENTRY_DSN: ${{ vars.SENTRY_DSN || secrets.SENTRY_DSN || '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Error-spike probe
+        uses: ./.github/actions/error-spike-to-issue
+        with:
+          window-minutes: ${{ github.event.inputs.window-minutes || '60' }}
+          threshold: ${{ github.event.inputs.threshold || '50' }}
+          labels: 'bug,auto'
+          repo: ${{ github.repository }}
+          token: ${{ github.token }}
+          sentry-dsn: ${{ vars.SENTRY_DSN || secrets.SENTRY_DSN || '' }}
+          # If your deployment funnels server logs into an artifact that this
+          # workflow can download, set the resolved path here. Default: empty.
+          log-path: ''

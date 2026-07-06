@@ -68,6 +68,18 @@ def _strip_unit_prefix(unit_id: str) -> tuple[Optional[str], str]:
     return None, unit_id
 
 
+def _looks_like_doc_section_id(unit_id: str) -> bool:
+    """Return True for jDocMunch section IDs.
+
+    jDocMunch section IDs are ``repo::doc_path::slug#level`` where ``level`` is
+    numeric. jCodeMunch symbol IDs are usually ``file_path::name#kind`` where
+    ``kind`` is textual, so checking the suffix avoids sending symbol lookups
+    to the docs store in auto mode.
+    """
+    head, sep, level = unit_id.rpartition("#")
+    return bool(sep and level.isdigit() and head.count("::") >= 2)
+
+
 def _load_code_index(repo: str, storage_path: Optional[str]):
     from ..storage import IndexStore
     from ._utils import resolve_repo as resolve_code_repo
@@ -231,7 +243,7 @@ def _domains_for_unit(unit_id: str, domain: Optional[str]) -> tuple[list[str], s
         return ["code", "docs"], bare
     # jDocMunch section ids end with "#<level>"; jCodeMunch symbol ids normally
     # do not. When uncertain, prefer code to avoid reading prose for symbols.
-    if "#" in bare and "::" in bare:
+    if _looks_like_doc_section_id(bare):
         return ["docs"], bare
     return ["code"], bare
 

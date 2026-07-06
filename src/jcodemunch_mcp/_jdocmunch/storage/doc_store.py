@@ -860,6 +860,19 @@ class DocStore:
         kept_loader = getattr(index, "_content_loader", None)
         new_raw_map = dict(raw_files)
 
+        def _stats_loader(doc_path: str, byte_start: int, byte_end: int) -> str:
+            content = new_raw_map.get(doc_path)
+            if content is not None:
+                if isinstance(content, bytes):
+                    return content[byte_start:byte_end].decode(
+                        "utf-8", errors="replace"
+                    )
+                raw = str(content).encode("utf-8")
+                return raw[byte_start:byte_end].decode("utf-8", errors="replace")
+            if kept_loader is None:
+                return ""
+            return kept_loader(doc_path, byte_start, byte_end)
+
         # Inline content for the new tail so compute_corpus_stats doesn't
         # need to re-read disk for them; kept sections fall through to the
         # _stats_loader byte-range read.

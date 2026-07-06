@@ -22,10 +22,8 @@ from __future__ import annotations
 
 import json as _json
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
-from .. import config as _config
-from ..storage import token_tracker as _tt
 
 # Column indices into a ranking_events row tuple.
 _TS, _REPO, _TOOL, _QH, _QUERY, _RETURNED = 0, 1, 2, 3, 4, 5

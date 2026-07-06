@@ -7,7 +7,6 @@ import re
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Generator
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path

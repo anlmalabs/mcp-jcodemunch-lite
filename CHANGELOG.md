@@ -2,6 +2,45 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [Unreleased] - 2026-07-01 - Error-spike + dead-flag pipelines
+
+### Added — dead feature-flag detector + CI job
+
+New `scripts/detect_dead_flags.py` walks `src/jcodemunch_mcp/` (skipping
+`feature_flags.py` itself) and fails when any `_Flag` registered in `FF` has
+zero references in `src/`. Stale flags after a codemod now surface as CI
+failures. Empty registry passes vacuously. New CI job
+`dead-feature-flags-check` in `quality-gates.yml` runs only when the registry
+is non-empty. Tests in `tests/test_dead_flags.py` (6) cover all paths;
+`AGENTS.md` documents the new-flag rule.
+
+### Added — error-spike-to-issue GitHub Action + workflow
+
+- **New composite GitHub Action** `.github/actions/error-spike-to-issue/action.yml`
+  + `_run.sh` probes for a spike in errors over a configurable window-minutes
+  (default 60) and creates a de-duplicated GitHub issue titled
+  `[auto] Error spike: N errors in Wmin` via `gh issue create` when the count
+  crosses a user-set `threshold` (default 50). Operates in two fallback modes:
+  (1) grep local log lines tagged `ERROR` / `logging.ERROR` from the configured
+  `${{ inputs.log-path }}`; (2) query GitHub's `gh api repos/{owner}/{repo}/issues`
+  with `state:closed` + `label:bug,auto` in the window to estimate recency.
+  **Fail-safe**: exits 0 and logs when `gh` is unauthenticated, when no `GITHUB_TOKEN`
+  is set, or when `SENTRY_DSN` is unset — no SDK required for the GitHub-native
+  deliverable. Flip `error_to_insight_pipeline` from 0 → 1.
+- **Scheduled workflow** `.github/workflows/error-spike.yml` invokes the action
+  every 30 minutes (`cron: "*/30 * * * *"`) plus `workflow_dispatch`. Reads
+  `SENTRY_DSN` via `env` (unrequired) and uses the existing `github.token` flow.
+- **Smoke test** `scripts/smoke-error-pipeline.sh` sources the action's function-level
+  logic and asserts each step (`[ok]` auth / threshold / issue-create dry-run) — exits
+  0 in CI-timeable <5 seconds.
+- **Documentation** — §1.1 alert table in `docs/OBSERVABILITY.md` gains the
+  "Error-spike → GitHub issue" row; §1.2 extends with the new recipe; `AGENTS.md`
+  documents the alert rule.
+
+No source-code behavior change; server runtime semantics unchanged.
+
+---
+
 ## [1.108.82] - 2026-06-24 - Exclude org_savings.db from list_repos
 
 The team-SKU org-rollup store (`org_savings.db`, written by `org/store.py`) lives

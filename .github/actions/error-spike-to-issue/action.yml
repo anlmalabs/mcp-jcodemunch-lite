@@ -1,0 +1,75 @@
+name: error-spike-to-issue
+description: >
+  Probes for a production error spike and creates a de-duplicated GitHub issue.
+  Fail-safe: exits 0 and short-circuits when `gh` is unauthenticated,
+  when no log path / repo is readable, or when `SENTRY_DSN` is unset.
+
+inputs:
+  window-minutes:
+    description: >-
+      Look-back window in minutes. Default 60.
+    required: false
+    default: '60'
+  threshold:
+    description: >-
+      Minimum errors in the window required to create an issue. Default 50.
+    required: false
+    default: '50'
+  labels:
+    description: >-
+      Comma-separated GitHub-label list applied to the auto-created issue.
+      Default "bug,auto".
+    required: false
+    default: bug,auto
+  repo:
+    description: >-
+      Target org/repo slug for `gh issue create`. Defaults to the triggering
+      repository.
+    required: false
+    default: ''
+  token:
+    description: >-
+      GitHub token (must have issues:write) for `gh issue create`. Action is a
+      no-op if unset.
+    required: false
+    default: ''
+  sentry-dsn:
+    description: |
+      Optional Sentry / Bugsnag / Rollbar DSN/secret. If none is set, the
+      action falls back to the GitHub-native probe path (no-op for SaaS).
+    required: false
+    default: ''
+  log-path:
+    description: >-
+      Optional path to a log file to probe. The composite action only reads it;
+      parses last N minutes for `ERROR` / `logging.ERROR` markers. Empty = no log
+      probe.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - id: error-spike-run
+      name: 'Probe error rate and create an issue if it spikes'
+      if: ${{ inputs.token != '' || (env.GH_TOKEN != '' && env.GH_TOKEN != null) || (env.GITHUB_TOKEN != '' && env.GITHUB_TOKEN != null) }}
+      shell: bash
+      env:
+        INPUT_WINDOW_MINUTES: ${{ inputs.window-minutes }}
+        INPUT_THRESHOLD: ${{ inputs.threshold }}
+        INPUT_LABELS: ${{ inputs.labels }}
+        INPUT_REPO: ${{ inputs.repo || github.repository }}
+        INPUT_TOKEN: ${{ inputs.token || github.token }}
+        INPUT_LOG_PATH: ${{ inputs.log-path }}
+        SENTRY_DSN: ${{ inputs.sentry-dsn || env.SENTRY_DSN || '' }}
+      run: |
+        set -euo pipefail
+        bash "${{ github.action_path }}/_run.sh"
+      # Fail-safe: never fail the build because of the probe action.
+      continue-on-error: true
+
+    - name: Skip — no token
+      if: ${{ inputs.token == '' && (env.GH_TOKEN == '' || env.GH_TOKEN == null) && (env.GITHUB_TOKEN == '' || env.GITHUB_TOKEN == null) }}
+      shell: bash
+      run: |
+        echo "[info] error-spike-to-issue: no github.token / GH_TOKEN / GITHUB_TOKEN — short-circuiting so the build stays green."

@@ -175,6 +175,40 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
 ]
 
 
+# Hidden legacy reading names that still dispatch for compatibility. Treat
+# these as the canonical replacement for config disabling so old configs keep
+# working and new configs cannot bypass a disabled unified tool via an alias.
+_ALIAS_TO_CANONICAL: dict[str, str] = {
+    "index_repo": "index_content",
+    "index_folder": "index_content",
+    "get_file_tree": "list_content",
+    "get_file_outline": "get_outline",
+    "get_file_content": "get_file",
+    "search_symbols": "search_units",
+    "get_symbol_source": "get_unit",
+    "get_context_bundle": "get_unit_context",
+}
+_CANONICAL_TO_ALIASES: dict[str, set[str]] = {}
+for _alias, _canonical in _ALIAS_TO_CANONICAL.items():
+    _CANONICAL_TO_ALIASES.setdefault(_canonical, set()).add(_alias)
+
+
+def _tool_disable_names(name: str) -> set[str]:
+    canonical = _ALIAS_TO_CANONICAL.get(name, name)
+    return {name, canonical, *_CANONICAL_TO_ALIASES.get(canonical, set())}
+
+
+def _disabled_tool_match(name: str, repo: str | None = None) -> str | None:
+    for candidate in _tool_disable_names(name):
+        if config_module.is_tool_disabled(candidate, repo=repo):
+            return candidate
+    return None
+
+
+def _disabled_by_set(name: str, disabled: set[str]) -> bool:
+    return bool(_tool_disable_names(name) & disabled)
+
+
 # --- The Counter: adaptive tool surface (front door) ----------------------- #
 # order/menu/route collapse the ~83-tool surface to a 3-tool front door without
 # removing any capability. See docs/prd-adaptive-tool-surface.md + counter.py.
@@ -2518,7 +2552,7 @@ def _build_tools_list() -> list[Tool]:
     disabled = config_module.get("disabled_tools", [])
     if disabled:
         disabled_set = set(disabled)
-        tools = [t for t in all_tools if t.name not in disabled_set]
+        tools = [t for t in all_tools if not _disabled_by_set(t.name, disabled_set)]
     else:
         tools = list(all_tools)
 
@@ -3053,12 +3087,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
         # Project-level tool disabling: check if tool is disabled for this project
         # Global disabled tools are filtered out in list_tools() schema; project-level
         # rejection happens here since schema is global (can't be changed per-project).
-        if config_module.is_tool_disabled(name, repo=repo_arg):
+        disabled_by = _disabled_tool_match(name, repo=repo_arg)
+        if disabled_by is not None:
+            canonical = _ALIAS_TO_CANONICAL.get(name, name)
+            if disabled_by != name or canonical != name:
+                alias_note = (
+                    f" (matched disabled_tools entry '{disabled_by}' for "
+                    f"canonical tool '{canonical}')"
+                )
+            else:
+                alias_note = ""
             return _error_call_result(
                 json.dumps(
                     {
                         "error": (
-                            f"Tool '{name}' is disabled in this project's configuration. "
+                            f"Tool '{name}' is disabled in this project's configuration{alias_note}. "
                             f"Project-level tool disabling is set via the 'disabled_tools' key "
                             f"in the .jcodemunch.jsonc file. Remove '{name}' from 'disabled_tools' to re-enable."
                         )
@@ -4284,11 +4327,20 @@ async def _run_server_with_watcher(
         ).close()
 
 
+def _init_error_tracking_for_startup() -> None:
+    """Initialize optional error-tracking SDKs for every server transport."""
+    from .error_tracking import init_error_tracking
+
+    init_error_tracking()
+
+
 async def run_stdio_server():
     """Run the MCP server over stdio (default)."""
     import sys
 
     from mcp.server.stdio import stdio_server
+
+    _init_error_tracking_for_startup()
 
     print(
         f"jcodemunch-mcp {__version__} by jgravelle · https://github.com/jgravelle/jcodemunch-mcp",
@@ -4458,6 +4510,8 @@ async def run_sse_server(host: str, port: int):
     """Run the MCP server with SSE transport (persistent HTTP mode)."""
     import sys
 
+    _init_error_tracking_for_startup()
+
     try:
         import uvicorn
         from starlette.applications import Starlette
@@ -4540,6 +4594,8 @@ async def run_streamable_http_server(host: str, port: int):
     """Run the MCP server with streamable-http transport (persistent HTTP mode)."""
     import sys
     import uuid
+
+    _init_error_tracking_for_startup()
 
     try:
         import uvicorn
