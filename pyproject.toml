@@ -1,6 +1,6 @@
 [project]
 name = "animamunch"
-version = "1.108.103"
+version = "1.108.104"
 description = "Token-efficient MCP server for source code exploration via tree-sitter AST parsing"
 readme = "README.md"
 requires-python = ">=3.10"
